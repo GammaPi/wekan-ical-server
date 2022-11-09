@@ -20,11 +20,11 @@ CACHE_SEC = int(os.environ.get("CACHE_SEC", default=-1))  # In seconds
 app = Flask(__name__)
 
 
-def create_ical_event(cal, board, card, card_info):
+def create_ical_event(cal, board, card, card_info, dueDate):
     event = cal.add("vevent")
     event.add("summary").value = board.title + ": " + card_info["title"]
-    event.add("dtstart").value = dateutil.parser.parse(card_info["dueAt"])
-
+    assert (dueDate != None)
+    event.add("dtstart").value = dueDate
 
     if "description" in card_info:
         event.add("description").value = card_info["description"]
@@ -52,6 +52,31 @@ def internal_error(exception):
     print(traceback.format_exc())
 
 
+def checkCardHasField(cardInfo, name):
+    if name in cardInfo and cardInfo[name] is not None:
+        return cardInfo[name]
+    else:
+        return None
+
+
+def checkCardHasCustomField(cardInfo, boardCustomFieldIdMap, name):
+    hasThisFild = name in boardCustomFieldIdMap
+    if not hasThisFild:
+        # This field does not exist in this board
+        return None
+    fieldId = boardCustomFieldIdMap[name]
+    customFiledDict = {i['_id']: i for i in cardInfo['customFields']}
+
+    if fieldId not in customFiledDict:
+        # This field does not exist in this card
+        return None
+
+    if 'value' in customFiledDict[fieldId]:
+        return customFiledDict[fieldId]['value']
+    else:
+        return None
+
+
 @app.route('/', methods=['GET'])
 def do_GET():
     curTimestamp = time.time()
@@ -64,6 +89,7 @@ def do_GET():
     userCachedResponse = responseCacheDict[username]
 
     if curTimestamp - userCachedResponse.lastUpdateTimestamp > CACHE_SEC:
+        print('Fetch',curTimestamp - userCachedResponse.lastUpdateTimestamp,CACHE_SEC)
         userCachedResponse.lastUpdateTimestamp = curTimestamp
 
         wekan_api = WekanApi(
@@ -88,17 +114,34 @@ def do_GET():
         for board in boards:
             if board.title == 'Templates':
                 continue
+
+            boardCustomFieldIdMap = {}
+            boardCustomFieldList = wekan_api.api_call("/api/boards/" + board.id + '/custom-fields')
+            for boardCustomField in boardCustomFieldList:
+                boardCustomFieldIdMap[boardCustomField['name']] = boardCustomField['_id']
+
             cardslists = board.get_cardslists()
             for cardslist in cardslists:
                 cards = cardslist.get_cards()
                 for card in cards:
                     info = card.get_card_info()
-                    if "dueAt" in info and info["dueAt"] is not None:
-                        create_ical_event(cal, board, card, info)
+                    print(info['customFields'])
+                    dueAt = checkCardHasField(info, 'dueAt')
+                    myDueAt = checkCardHasCustomField(info, boardCustomFieldIdMap, 'MyDueAt')
+                    unfinished = checkCardHasCustomField(info, boardCustomFieldIdMap, 'Unfinished')
+                    endAt = "endAt" in info and info["endAt"] is not None
+
+                    if not unfinished:
+                        if myDueAt and not endAt:
+                            myDueDate = dateutil.parser.parse(myDueAt)
+                            create_ical_event(cal, board, card, info, myDueDate)
+                        elif dueAt and not endAt:
+                            dueDate = dateutil.parser.parse(dueAt)
+                            create_ical_event(cal, board, card, info, dueDate)
 
         userCachedResponse.cacheResponse = cal.serialize().encode()
     return Response(userCachedResponse.cacheResponse, mimetype='text/calendar')
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0")
