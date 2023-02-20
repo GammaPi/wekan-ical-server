@@ -39,7 +39,7 @@ class CachedResponse:
         self.userId = None
 
 
-responseCacheDict = defaultdict(CachedResponse)
+userCachedResponse = CachedResponse()
 
 
 def get_user_boards1(curAPI, user_id):
@@ -81,13 +81,6 @@ def checkCardHasCustomField(cardInfo, boardCustomFieldIdMap, name):
 @app.route('/', methods=['GET'])
 def do_GET():
     curTimestamp = time.time()
-
-    username = request.args.get('username')
-
-    if username == None:
-        return Response(response='Invalid parameter for username', status=400)
-
-    userCachedResponse = responseCacheDict[username]
 
     if curTimestamp - userCachedResponse.lastUpdateTimestamp > CACHE_SEC:
         # print('Fetch', curTimestamp - userCachedResponse.lastUpdateTimestamp, CACHE_SEC)
