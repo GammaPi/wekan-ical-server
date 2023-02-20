@@ -27,6 +27,8 @@ def create_ical_event(cal, board, cardId, title, description, startDate, dueDate
     assert (dueDate != None)
     if startDate:
         event.add("dtstart").value = startDate
+        event.add("dtend").value = dueDate
+
     else:
         event.add("dtstart").value = dueDate
 
