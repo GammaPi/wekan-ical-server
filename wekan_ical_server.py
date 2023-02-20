@@ -2,6 +2,7 @@ import os
 import traceback
 from collections import defaultdict
 
+import requests
 from wekanapi.models import Board
 from wekanapi import WekanApi
 from flask import Flask, request, Response
@@ -20,15 +21,15 @@ CACHE_SEC = int(os.environ.get("CACHE_SEC", default=-1))  # In seconds
 app = Flask(__name__)
 
 
-def create_ical_event(cal, board, card, card_info, dueDate):
+def create_ical_event(cal, board, cardId, title, description, dueDate):
     event = cal.add("vevent")
-    event.add("summary").value = board.title + ": " + card_info["title"]
+    event.add("summary").value = board.title + ": " + title
     assert (dueDate != None)
     event.add("dtstart").value = dueDate
 
-    if "description" in card_info:
-        event.add("description").value = card_info["description"]
-    event.add("url").value = WEKAN_HOST + "/b/" + board.id + "/x/" + card.id
+    if description:
+        event.add("description").value = description
+    event.add("url").value = WEKAN_HOST + "/b/" + board.id + "/x/" + cardId
 
 
 class CachedResponse:
@@ -89,57 +90,38 @@ def do_GET():
     userCachedResponse = responseCacheDict[username]
 
     if curTimestamp - userCachedResponse.lastUpdateTimestamp > CACHE_SEC:
-        print('Fetch',curTimestamp - userCachedResponse.lastUpdateTimestamp,CACHE_SEC)
-        userCachedResponse.lastUpdateTimestamp = curTimestamp
+        # print('Fetch', curTimestamp - userCachedResponse.lastUpdateTimestamp, CACHE_SEC)
 
         wekan_api = WekanApi(
             WEKAN_HOST, {"username": WEKAN_USER, "password": WEKAN_PASSWORD}
         )
 
-        if userCachedResponse.userId is None:
-            # Find this user
-            userDataList = wekan_api.api_call("/api/users")
-
-            # Find matched username
-            for userData in userDataList:
-                if userData['username'] == username:
-                    userCachedResponse.userId = userData['_id']
-                    break
-            if userCachedResponse.userId is None:
-                return Response(response='No user found', status=400)
-
         cal = vobject.iCalendar()
         boards = None
-        boards = get_user_boards1(wekan_api, userCachedResponse.userId)
+        boards = get_user_boards1(wekan_api, wekan_api.user_id)
         for board in boards:
             if board.title == 'Templates':
                 continue
+            print('Processing boards', board.title)
+            boardExport = wekan_api.api_call("/api/boards/" + board.id + '/export?authToken=' + wekan_api.token)
 
-            boardCustomFieldIdMap = {}
-            boardCustomFieldList = wekan_api.api_call("/api/boards/" + board.id + '/custom-fields')
-            for boardCustomField in boardCustomFieldList:
-                boardCustomFieldIdMap[boardCustomField['name']] = boardCustomField['_id']
-
-            cardslists = board.get_cardslists()
-            for cardslist in cardslists:
-                cards = cardslist.get_cards()
-                for card in cards:
-                    info = card.get_card_info()
-                    print(info['customFields'])
-                    dueAt = checkCardHasField(info, 'dueAt')
-                    myDueAt = checkCardHasCustomField(info, boardCustomFieldIdMap, 'MyDueAt')
-                    unfinished = checkCardHasCustomField(info, boardCustomFieldIdMap, 'Unfinished')
-                    endAt = "endAt" in info and info["endAt"] is not None
+            for card in boardExport['cards']:
+                if not card['archived']:
+                    dueAt = checkCardHasField(card, 'dueAt')
+                    myDueAt = checkCardHasField(card, 'MyDueAt')
+                    unfinished = checkCardHasField(card, 'Unfinished')
+                    endAt = checkCardHasField(card, 'endAt')
 
                     if not unfinished:
                         if myDueAt and not endAt:
                             myDueDate = dateutil.parser.parse(myDueAt)
-                            create_ical_event(cal, board, card, info, myDueDate)
+                            create_ical_event(cal, board, card['_id'], card['title'], card['description'], myDueDate)
                         elif dueAt and not endAt:
                             dueDate = dateutil.parser.parse(dueAt)
-                            create_ical_event(cal, board, card, info, dueDate)
-
+                            create_ical_event(cal, board, card['_id'], card['title'], card['description'], dueDate)
+        userCachedResponse.lastUpdateTimestamp = curTimestamp
         userCachedResponse.cacheResponse = cal.serialize().encode()
+
     return Response(userCachedResponse.cacheResponse, mimetype='text/calendar')
 
 
