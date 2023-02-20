@@ -21,11 +21,14 @@ CACHE_SEC = int(os.environ.get("CACHE_SEC", default=-1))  # In seconds
 app = Flask(__name__)
 
 
-def create_ical_event(cal, board, cardId, title, description, dueDate):
+def create_ical_event(cal, board, cardId, title, description, startDate, dueDate):
     event = cal.add("vevent")
     event.add("summary").value = board.title + ": " + title
     assert (dueDate != None)
-    event.add("dtstart").value = dueDate
+    if startDate:
+        event.add("dtstart").value = startDate
+    else:
+        event.add("dtstart").value = dueDate
 
     if description:
         event.add("description").value = description
@@ -82,7 +85,7 @@ def checkCardHasCustomField(cardInfo, boardCustomFieldIdMap, name):
 def do_GET():
     curTimestamp = time.time()
 
-    if curTimestamp - userCachedResponse.lastUpdateTimestamp > CACHE_SEC:
+    if False or curTimestamp - userCachedResponse.lastUpdateTimestamp > CACHE_SEC:
         # print('Fetch', curTimestamp - userCachedResponse.lastUpdateTimestamp, CACHE_SEC)
 
         wekan_api = WekanApi(
@@ -101,17 +104,23 @@ def do_GET():
             for card in boardExport['cards']:
                 if not card['archived']:
                     dueAt = checkCardHasField(card, 'dueAt')
+                    if dueAt:
+                        dueAt = dateutil.parser.parse(dueAt)
+
                     myDueAt = checkCardHasField(card, 'MyDueAt')
+                    if myDueAt:
+                        dueAt=dateutil.parser.parse(myDueAt)
+                    startAt = checkCardHasField(card, 'startAt')
+                    if startAt:
+                        startAt = dateutil.parser.parse(startAt)
                     unfinished = checkCardHasField(card, 'Unfinished')
                     endAt = checkCardHasField(card, 'endAt')
+                    if endAt:
+                        endAt=dateutil.parser.parse(endAt)
 
-                    if not unfinished:
-                        if myDueAt and not endAt:
-                            myDueDate = dateutil.parser.parse(myDueAt)
-                            create_ical_event(cal, board, card['_id'], card['title'], card['description'], myDueDate)
-                        elif dueAt and not endAt:
-                            dueDate = dateutil.parser.parse(dueAt)
-                            create_ical_event(cal, board, card['_id'], card['title'], card['description'], dueDate)
+                    if not unfinished and dueAt is not None and endAt is None:
+                        # Do not list cards that are unfinished
+                        create_ical_event(cal, board, card['_id'], card['title'], card['description'], startAt, dueAt)
         userCachedResponse.lastUpdateTimestamp = curTimestamp
         userCachedResponse.cacheResponse = cal.serialize().encode()
 
