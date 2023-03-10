@@ -102,23 +102,23 @@ def do_GET():
                 continue
             print('Processing boards', board.title)
             boardExport = wekan_api.api_call("/api/boards/" + board.id + '/export?authToken=' + wekan_api.token)
-
+            customFieldIdMap = {card['name']: card['_id'] for card in boardExport['customFields']}
             for card in boardExport['cards']:
                 if not card['archived']:
                     dueAt = checkCardHasField(card, 'dueAt')
                     if dueAt:
                         dueAt = dateutil.parser.parse(dueAt)
 
-                    myDueAt = checkCardHasField(card, 'MyDueAt')
+                    myDueAt = checkCardHasCustomField(card, customFieldIdMap, 'MyDueAt')
                     if myDueAt:
-                        dueAt=dateutil.parser.parse(myDueAt)
+                        dueAt = dateutil.parser.parse(myDueAt)
                     startAt = checkCardHasField(card, 'startAt')
                     if startAt:
                         startAt = dateutil.parser.parse(startAt)
-                    unfinished = checkCardHasField(card, 'Unfinished')
+                    unfinished = checkCardHasCustomField(card, customFieldIdMap, 'Unfinished')
                     endAt = checkCardHasField(card, 'endAt')
                     if endAt:
-                        endAt=dateutil.parser.parse(endAt)
+                        endAt = dateutil.parser.parse(endAt)
 
                     if not unfinished and dueAt is not None and endAt is None:
                         # Do not list cards that are unfinished
